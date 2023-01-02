@@ -27,7 +27,8 @@ void print_help() {
             -h                      Print this help message\n \
             -d <ACPI Device Name>   Modify brightness for specific device (required)\n \
             -s <brightness>         Set brightness level\n \
-            -c <brightness delta>   Change brightness by delta");
+            -c <brightness delta>   Change brightness by delta\n \
+            -p <percent>            Set brightness percentage\n");
 }
 
 int get_brightness_fd(char *path, int path_len) {
@@ -71,6 +72,16 @@ int get_max_brightness(char *path, int path_len) {
     return max;
 }
 
+void set_brightness(int new_brightness, int max_brightness, int brightness_fd) {
+    // Ensure no negative or over 100% level brightness
+    new_brightness = MIN(MAX(new_brightness, 0), max_brightness);
+
+    char *brightness_buffer = calloc(10, sizeof(char));
+    sprintf(brightness_buffer, "%d", new_brightness);
+    write(brightness_fd, brightness_buffer, strlen(brightness_buffer));
+    free(brightness_buffer);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Must provide value to alter brightness.\n");
@@ -84,7 +95,9 @@ int main(int argc, char **argv) {
     char *level_buffer = NULL;  // level to set  
     int level_length = 0;       // parsed level str length
 
-    int level_change = 0;      // amount to change level by
+    int level_change = 0;       // amount to change level by
+
+    int percentage = -1;         // -p
 
     char *device = NULL;        // -d 
 
@@ -92,7 +105,7 @@ int main(int argc, char **argv) {
 
     int opt;                    // getopt
 
-    while ((opt = getopt(argc, argv, "had:s:c:")) != -1) {
+    while ((opt = getopt(argc, argv, "had:s:c:p:")) != -1) {
         switch (opt) {
             case 'h':
                 help = 1;
@@ -100,10 +113,30 @@ int main(int argc, char **argv) {
             case 'd':
                 device = strdup(optarg);
                 break;
+            case 'p':
+
+                if (level_buffer != NULL || level_change != 0) {
+                    fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
+                    return 1;
+                }
+
+                percentage = (int)strtol(optarg, &endptr, 10);
+
+                if (endptr == optarg || (*endptr != ' ' && *endptr != '\0')) {
+                    fprintf(stderr, "Could not parse %c, as int.\n", *endptr);
+                    return 1;
+                }
+
+                if (percentage < 0 || percentage > 100) {
+                    fprintf(stderr, "%d\% is not a valid brightness!\n", percentage);
+                    return 1;
+                }
+
+                break;
             case 's':
 
-                if (level_change != 0) {
-                    fprintf(stderr, "Cannot use -s and -c! acpi_bright -h for more info.\n");
+                if (level_change != 0 || percentage != -1) {
+                    fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
                     return 1;
                 }
 
@@ -113,8 +146,8 @@ int main(int argc, char **argv) {
                 break;
             case 'c':
 
-                if (level_buffer != NULL) {
-                    fprintf(stderr, "Cannot use -s and -c! acpi_bright -h for more info.\n");
+                if (level_buffer != NULL || percentage != -1) {
+                    fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
                     return 1;
                 }
 
@@ -168,9 +201,12 @@ int main(int argc, char **argv) {
     int brightness_fd = get_brightness_fd(path, path_len);
 
     free(path);
-
-    if (level_buffer != NULL) { // setting value
+    if (percentage != -1) { // setting percentage
+        int new_brightness = (percentage/100.0)*max_brightness;
+        set_brightness(new_brightness, max_brightness, brightness_fd);
+    } else if (level_buffer != NULL) { // setting value
         write(brightness_fd, level_buffer, level_length);
+        free(level_buffer);
     } else { // changing value
         char *curr_str = calloc(10, sizeof(char));
         int bytes = read(brightness_fd, curr_str, 10);
@@ -185,14 +221,8 @@ int main(int argc, char **argv) {
 
         brightness += level_change;
         
-        // Ensure no negative or over 100% level brightness
-        brightness = MIN(MAX(brightness, 0), max_brightness);
-
-        level_buffer = calloc(10, sizeof(char));
-        sprintf(level_buffer, "%d", brightness);
-        write(brightness_fd, level_buffer, strlen(level_buffer));
+        set_brightness(brightness, max_brightness, brightness_fd);
     }
-    
-    free(level_buffer);
+
     close(brightness_fd);
 }
