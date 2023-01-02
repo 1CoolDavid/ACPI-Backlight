@@ -37,6 +37,10 @@ int get_brightness_fd(char *path, int path_len) {
     
     int fd = open(brightness_path, O_RDWR);
 
+    if(fd < 0) {
+        fprintf(stderr, "Error occurred while opening %s. Check if file exists.\n", brightness_path);
+    }
+
     free(brightness_path);
 
     return fd;
@@ -57,11 +61,12 @@ int get_max_brightness(char *path, int path_len) {
     } 
 
     char *max_str = calloc(10, sizeof(char));
-    int bytes = read(fd, max_str, 10);
+    int bytes = read(fd, max_str, 9);
 
     close(fd);
 
     if(bytes == 0 || bytes == -1) {
+        free(max_str);
         fprintf(stderr, "Max brightness could not be read.\n");
         return -1L;
     }
@@ -117,6 +122,8 @@ int main(int argc, char **argv) {
 
                 if (level_buffer != NULL || level_change != 0) {
                     fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
+                    if(device) {free(device);}
+                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
@@ -124,11 +131,15 @@ int main(int argc, char **argv) {
 
                 if (endptr == optarg || (*endptr != ' ' && *endptr != '\0')) {
                     fprintf(stderr, "Could not parse %c, as int.\n", *endptr);
+                    if(device) {free(device);}
+                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
                 if (percentage < 0 || percentage > 100) {
                     fprintf(stderr, "%d\% is not a valid brightness!\n", percentage);
+                    if(device) {free(device);}
+                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
@@ -137,6 +148,8 @@ int main(int argc, char **argv) {
 
                 if (level_change != 0 || percentage != -1) {
                     fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
+                    if(device) {free(device);}
+                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
@@ -148,6 +161,8 @@ int main(int argc, char **argv) {
 
                 if (level_buffer != NULL || percentage != -1) {
                     fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
+                    if(device) {free(device);}
+                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
@@ -155,28 +170,43 @@ int main(int argc, char **argv) {
 
                 if (endptr == optarg || (*endptr != ' ' && *endptr != '\0')) {
                     fprintf(stderr, "Could not parse %c, as int.\n", *endptr);
+                    if(device) {free(device);}
+                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
                 if (!level_change) {
                     fprintf(stderr, "Can't change brightness by 0!\n");
+                    if(device) {free(device);}
+                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
                 break;
             default: /* bad */
                 fprintf(stderr, "Bad argument provided!\n");
+                if(device) {free(device);}
+                if(level_buffer) {free(level_buffer);}
                 return 1;
         }
     }
 
     if (help) {
         print_help();
+        if(device) {free(device);}
+        if(level_buffer) {free(level_buffer);}
         return 0;
     }
 
     if (!device) {
         fprintf(stderr, "ACPI device not specified.\n");
+        if(level_buffer) {free(level_buffer);}
+        return 1;
+    }
+
+    if (percentage == -1 && level_buffer == NULL && level_change == 0) {
+        fprintf(stderr, "Must use -s, -c, OR -p! acpi_bright -h for more info.\n");
+        free(device);
         return 1;
     }
 
@@ -184,23 +214,30 @@ int main(int argc, char **argv) {
     int path_len = device_len+ACPI_DIR_LEN+2;
     char *path = calloc(path_len, sizeof(char));
     
-    snprintf(path, path_len, "%s%s/", ACPI_DIR, device, MAX_FILE);
+    snprintf(path, path_len, "%s%s/", ACPI_DIR, device);
     free(device);
 
     int max_brightness = get_max_brightness(path, path_len);
-
+    
     if(max_brightness == -1) {
         free(path);
+        if(level_buffer) {free(level_buffer);}
         return 1;
     } else if (max_brightness < 0) {
         free(path);
-        fprintf(stderr, "Parse error with max brightness\n");
+        if(level_buffer) {free(level_buffer);}
+        fprintf(stderr, "Parsing error of max brightness\n");
         return 1;
     }
 
     int brightness_fd = get_brightness_fd(path, path_len);
-
     free(path);
+
+    if(brightness_fd < 0) {
+        if(level_buffer) {free(level_buffer);}
+        return 1;
+    }
+
     if (percentage != -1) { // setting percentage
         int new_brightness = (percentage/100.0)*max_brightness;
         set_brightness(new_brightness, max_brightness, brightness_fd);
