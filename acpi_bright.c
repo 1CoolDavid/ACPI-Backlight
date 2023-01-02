@@ -2,16 +2,56 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <string.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <unistd.h>
+
+static const char *ACPI_DIR = "/sys/class/backlight/";
+static const int ACPI_DIR_LEN = 22;
+
+static const char *MAX_FILE = "max_brightness";
+static const int MAX_FILE_LEN = 15;
 
 void print_help() {
     printf(
         "acpi_bright <options> \
          Program options:\n \
             -h                      Print this help message\n \
-            -d <ACPI Device Name>   Modify brightness for specific device\n \
-            -a                      Modify brightness for all devices\n \
-            -s <brightness>         Set brightness level \
+            -d <ACPI Device Name>   Modify brightness for specific device (required)\n \
+            -s <brightness>         Set brightness level\n \
             -c <brightness delta>   Change brightness by delta");
+}
+
+long get_max_brightness(char *device) {
+    int device_len = strlen(device);
+    int path_len = device_len+ACPI_DIR_LEN+MAX_FILE_LEN+2;
+    char *path = calloc(path_len, sizeof(char));
+    
+    snprintf(path, path_len, "%s%s/%s", ACPI_DIR, device, MAX_FILE);
+
+    int fd = open(path, O_RDONLY);
+
+    free(path);
+
+    if(fd == -1) {
+        fprintf(stderr, "Error occurred while opening %s. Check if file exists.\n");
+        return -1L;
+    } 
+
+    char *max_str = calloc(9, sizeof(char));
+    int bytes = read(fd, max_str, 9);
+
+    if(bytes == 0 || bytes == -1) {
+        fprintf(stderr, "Max brightness could not be read.\n");
+        return -1L;
+    }
+    
+    long max = strtol(max_str, NULL, 10);    
+    free(max_str);
+
+    return max;
 }
 
 int main(int argc, char **argv) {
@@ -22,22 +62,18 @@ int main(int argc, char **argv) {
 
     // Argument booleans and data
     int help = 0;               // -h
-    int all_selected = 0;       // -a
     int set_value = 0;          // 0 if no arg, 1 for s, 2 for c
     int level = 0;              // parsed level to set or change 
     char *device = NULL;        // -d 
 
     char *endptr;               // strtol
 
-    long opt;                   // getopt
+    int opt;                   // getopt
 
-    while ((opt = getopt(argc, argv, "had:s:c:"))) {
+    while ((opt = getopt(argc, argv, "had:s:c:")) != -1) {
         switch (opt) {
             case 'h':
                 help = 1;
-                break;
-            case 'a':
-                all_selected = 1;
                 break;
             case 'd':
                 device = strdup(optarg);
@@ -53,7 +89,7 @@ int main(int argc, char **argv) {
                 
                 level = strtol(optarg, &endptr, 10);
 
-                if (endptr == optarg || *endptr != ' ') {
+                if (endptr == optarg || (*endptr != ' ' && *endptr != '\0') ) {
                     fprintf(stderr, "Could not parse %c, as int.\n", *endptr);
                     return 1;
                 }
@@ -87,12 +123,29 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    if (set_value == 1) {
-        
-    } else if (set_value == 2) {
-
-    } else { 
+    if (set_value == 0) {
         fprintf(stderr, "Must set or change brightness.\n");
         return 1;
+    }
+
+    if (!device) {
+        fprintf(stderr, "ACPI device not specified.\n");
+        return 1;
+    }
+
+    long max_brightness = get_max_brightness(device);
+
+    if(max_brightness == -1) {
+        return 1;
+    } else if (max_brightness < 0) {
+        fprintf(stderr, "Parse error with max brightness\n");
+        return 1;
+    }
+
+
+    if (set_value == 1) {
+        
+    } else {
+
     }
 }
