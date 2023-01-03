@@ -195,8 +195,6 @@ int main(int argc, char **argv) {
                     endptr++;
                 }
 
-                printf("%d\n", level);
-
                 if (endptr == optarg || (*endptr != ' ' && *endptr != '\0')) {
                     fprintf(stderr, "Could not parse %c, as int or percent.\n", *endptr);
                     if(device) {free(device);}
@@ -292,13 +290,15 @@ int main(int argc, char **argv) {
         int brightness = atoi(curr_str);    
         free(curr_str);
         
-        int delta = level;
-        
-        delta = is_percentage ? percent_to_raw(delta, max_brightness) : delta; 
-
-        brightness += delta;
-        
-        set_brightness(brightness, max_brightness, brightness_fd);
+        if (is_percentage) {
+            // Adding 5% can lead to rounding errors so this is more accurate
+            int current_percent = ((brightness*100.0))/max_brightness;
+            int new_percent = MAX(MIN(current_percent + level, 100),0) ;
+            int new_brightness = percent_to_raw(current_percent+level, max_brightness);
+            set_brightness(new_brightness, max_brightness, brightness_fd);
+        } else {
+            set_brightness(brightness+level, max_brightness, brightness_fd);
+        }  
     }
 
     close(brightness_fd);
