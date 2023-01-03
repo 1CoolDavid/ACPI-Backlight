@@ -88,6 +88,27 @@ void set_brightness(int new_brightness, int max_brightness, int brightness_fd) {
     free(brightness_buffer);
 }
 
+int get_brightness(char *path, int path_len) {
+    int brightness_fd = get_brightness_fd(path, path_len);
+
+    if(brightness_fd < 0) {
+        return -1;
+    }
+
+    char *curr_str = calloc(10, sizeof(char));
+    int bytes = read(brightness_fd, curr_str, 10);
+
+    if(bytes == 0 || bytes == -1) {
+        fprintf(stderr, "Current brightness could not be read.\n");
+        return -1L;
+    }
+    
+    int brightness = atoi(curr_str);    
+    free(curr_str);
+
+    return brightness;
+}
+
 int percent_to_raw(int percent, int max) {
     float one_percent = max/100.0;
     float exact_brightness = percent*one_percent;
@@ -215,6 +236,17 @@ int main(int argc, char **argv) {
     snprintf(path, path_len, "%s%s/", ACPI_DIR, device);
     free(device);
 
+    if(get_raw) {
+        int brightness = get_brightness(path, path_len);
+        if(brightness) {
+            printf("%d\n", brightness);
+            free(path);
+            return 0;
+        }
+        free(path);
+        return 1;
+    }
+
     int max_brightness = get_max_brightness(path, path_len);
     
     if(max_brightness == -1) {
@@ -223,6 +255,18 @@ int main(int argc, char **argv) {
     } else if (max_brightness < 0) {
         free(path);
         fprintf(stderr, "Parsing error of max brightness\n");
+        return 1;
+    }
+
+    if(get_percent) {
+        int brightness = get_brightness(path, path_len);
+        float percentage = ((brightness*100.0))/max_brightness;
+        if(brightness) {
+            printf("%d\%\n", (int)percentage);
+            free(path);
+            return 0;
+        }
+        free(path);
         return 1;
     }
 
