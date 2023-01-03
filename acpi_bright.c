@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
@@ -26,9 +27,9 @@ void print_help() {
          Program options:\n \
             -h                      Print this help message\n \
             -d <ACPI Device Name>   Modify brightness for specific device (required)\n \
-            -s <brightness>         Set brightness level\n \
-            -c <brightness delta>   Change brightness by delta\n \
-            -p <percent>            Set brightness percentage\n");
+            -s <brightness>         Set brightness level, prepend with +/- to make change incremental (supports \%)\n \
+            -r                      Print current (raw) brightness \n \
+            -p                      Print current brightness percent \n");
 }
 
 int get_brightness_fd(char *path, int path_len) {
@@ -87,6 +88,13 @@ void set_brightness(int new_brightness, int max_brightness, int brightness_fd) {
     free(brightness_buffer);
 }
 
+int percent_to_raw(int percent, int max) {
+    float one_percent = max/100.0;
+    float exact_brightness = percent*one_percent;
+
+    return (int)exact_brightness < exact_brightness ? (int)exact_brightness+1 : (int)exact_brightness;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Must provide value to alter brightness.\n");
@@ -94,23 +102,25 @@ int main(int argc, char **argv) {
     }
 
     // Argument booleans and data
-    int help = 0;               // -h
-    int set_value = 0;          // 0 if no arg, 1 for s, 2 for c
+    bool help = 0;                  // -h
 
-    char *level_buffer = NULL;  // level to set  
-    int level_length = 0;       // parsed level str length
+    int level = 0;                  // level to set/change  
+    bool is_setting = false;        // -s
 
-    int level_change = 0;       // amount to change level by
+    bool is_incremental = false;    // is +/- parsed 
 
-    int percentage = -1;         // -p
+    bool is_percentage = false;     // is % parsed
 
-    char *device = NULL;        // -d 
+    bool get_raw = 0;               // -r
+    bool get_percent = 0;           // -p
+
+    char *device = NULL;            // -d 
 
     char *endptr;               // strtol
 
     int opt;                    // getopt
 
-    while ((opt = getopt(argc, argv, "had:s:c:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "hprs:d:")) != -1) {
         switch (opt) {
             case 'h':
                 help = 1;
@@ -119,66 +129,56 @@ int main(int argc, char **argv) {
                 device = strdup(optarg);
                 break;
             case 'p':
-
-                if (level_buffer != NULL || level_change != 0) {
-                    fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
+                if(get_raw) {
+                    fprintf(stderr, "Can't get raw and get percent. acpi_bright -h for more info.");
                     if(device) {free(device);}
-                    if(level_buffer) {free(level_buffer);}
+                    return 1;
+                } else if (is_setting) {
+                    fprintf(stderr, "Can't set and get. acpi_bright -h for more info.\n");
+                    if(device) {free(device);}
                     return 1;
                 }
 
-                percentage = (int)strtol(optarg, &endptr, 10);
-
-                if (endptr == optarg || (*endptr != ' ' && *endptr != '\0')) {
-                    fprintf(stderr, "Could not parse %c, as int.\n", *endptr);
+                get_percent = true;
+                break;
+            case 'r':
+                if(get_percent) {
+                    fprintf(stderr, "Can't get raw and get percent. acpi_bright -h for more info.");
                     if(device) {free(device);}
-                    if(level_buffer) {free(level_buffer);}
+                    return 1;
+                } else if (is_setting) {
+                    fprintf(stderr, "Can't set and get. acpi_bright -h for more info.\n");
+                    if(device) {free(device);}
                     return 1;
                 }
 
-                if (percentage < 0 || percentage > 100) {
-                    fprintf(stderr, "%d\% is not a valid brightness!\n", percentage);
-                    if(device) {free(device);}
-                    if(level_buffer) {free(level_buffer);}
-                    return 1;
-                }
-
+                get_raw = true;
                 break;
             case 's':
+                is_setting = true;
 
-                if (level_change != 0 || percentage != -1) {
-                    fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
+                if (*optarg == '+' || *optarg == '-') {
+                    is_incremental = true;
+                }
+
+                if (get_percent || get_raw) {
+                    fprintf(stderr, "Can't set and get. acpi_bright -h for more info.\n");
                     if(device) {free(device);}
-                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
-                level_length = strlen(optarg);
-                level_buffer = strdup(optarg);
+                level = (int)strtol(optarg, &endptr, 10);
 
-                break;
-            case 'c':
-
-                if (level_buffer != NULL || percentage != -1) {
-                    fprintf(stderr, "Only use 1: -s, -c, -p! acpi_bright -h for more info.\n");
-                    if(device) {free(device);}
-                    if(level_buffer) {free(level_buffer);}
-                    return 1;
+                if(*endptr == '%') {
+                    is_percentage = true;
+                    endptr++;
                 }
 
-                level_change = (int)strtol(optarg, &endptr, 10);
+                printf("%d\n", level);
 
                 if (endptr == optarg || (*endptr != ' ' && *endptr != '\0')) {
-                    fprintf(stderr, "Could not parse %c, as int.\n", *endptr);
+                    fprintf(stderr, "Could not parse %c, as int or percent.\n", *endptr);
                     if(device) {free(device);}
-                    if(level_buffer) {free(level_buffer);}
-                    return 1;
-                }
-
-                if (!level_change) {
-                    fprintf(stderr, "Can't change brightness by 0!\n");
-                    if(device) {free(device);}
-                    if(level_buffer) {free(level_buffer);}
                     return 1;
                 }
 
@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
             default: /* bad */
                 fprintf(stderr, "Bad argument provided!\n");
                 if(device) {free(device);}
-                if(level_buffer) {free(level_buffer);}
+                print_help();
                 return 1;
         }
     }
@@ -194,18 +194,16 @@ int main(int argc, char **argv) {
     if (help) {
         print_help();
         if(device) {free(device);}
-        if(level_buffer) {free(level_buffer);}
         return 0;
     }
 
     if (!device) {
         fprintf(stderr, "ACPI device not specified.\n");
-        if(level_buffer) {free(level_buffer);}
         return 1;
     }
 
-    if (percentage == -1 && level_buffer == NULL && level_change == 0) {
-        fprintf(stderr, "Must use -s, -c, OR -p! acpi_bright -h for more info.\n");
+    if (!get_raw && level == 0 && !get_percent) {
+        fprintf(stderr, "Too few arguments supplied. acpi_bright -h for more info.\n");
         free(device);
         return 1;
     }
@@ -221,11 +219,9 @@ int main(int argc, char **argv) {
     
     if(max_brightness == -1) {
         free(path);
-        if(level_buffer) {free(level_buffer);}
         return 1;
     } else if (max_brightness < 0) {
         free(path);
-        if(level_buffer) {free(level_buffer);}
         fprintf(stderr, "Parsing error of max brightness\n");
         return 1;
     }
@@ -234,16 +230,12 @@ int main(int argc, char **argv) {
     free(path);
 
     if(brightness_fd < 0) {
-        if(level_buffer) {free(level_buffer);}
         return 1;
     }
 
-    if (percentage != -1) { // setting percentage
-        int new_brightness = (percentage/100.0)*max_brightness;
+    if (!is_incremental) { // setting value
+        int new_brightness = is_percentage ? percent_to_raw(level, max_brightness) : level;
         set_brightness(new_brightness, max_brightness, brightness_fd);
-    } else if (level_buffer != NULL) { // setting value
-        write(brightness_fd, level_buffer, level_length);
-        free(level_buffer);
     } else { // changing value
         char *curr_str = calloc(10, sizeof(char));
         int bytes = read(brightness_fd, curr_str, 10);
@@ -255,8 +247,12 @@ int main(int argc, char **argv) {
         
         int brightness = atoi(curr_str);    
         free(curr_str);
+        
+        int delta = level;
+        
+        delta = is_percentage ? percent_to_raw(delta, max_brightness) : delta; 
 
-        brightness += level_change;
+        brightness += delta;
         
         set_brightness(brightness, max_brightness, brightness_fd);
     }
